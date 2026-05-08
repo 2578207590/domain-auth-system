@@ -20,12 +20,13 @@ $isWildcardQuery = false;
 
 if (isset($_POST['check']) || isset($_POST['active'])) {
     $domain = trim($_POST['domain'] ?? '');
-    if (empty($domain) || strpos($domain, ' ') !== false) {
-        $activationResult = ['code' => -1, 'msg' => '请输入正确域名'];
+    $isWildcard = (strpos($domain, '*') !== false);
+    $isWildcardQuery = $isWildcard;
+    $domain = $isWildcard ? $domain : cleanDomain($domain);
+
+    if (!isValidDomain($domain)) {
+        $activationResult = ['code' => -1, 'msg' => '请输入正确的域名（如 abc.com）'];
     } else {
-        $isWildcard = (strpos($domain, '*') !== false);
-        $isWildcardQuery = $isWildcard;
-        $domain = $isWildcard ? $domain : cleanDomain($domain);
 
         if (isset($_POST['check'])) {
             $result = checkDomainAuth($conn, $domain);
@@ -250,9 +251,24 @@ function checkDomain() {
     }
     v = v.trim();
     el.value = v;
-    if (!v || v.includes(' ')) {
-        alert('请输入合法域名');
-        return false;
+    if (!v) { alert('请输入域名'); return false; }
+    // 标准域名校验
+    if (isWildcard) {
+        let suffix = v.substring(2);
+        if (!suffix || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(suffix)) {
+            alert('请输入正确的泛域名（如 *.abc.com）');
+            return false;
+        }
+    } else {
+        // 拒绝 IP
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) {
+            alert('请输入域名，不能使用IP地址');
+            return false;
+        }
+        if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(v)) {
+            alert('请输入正确的域名（如 abc.com）');
+            return false;
+        }
     }
     return true;
 }

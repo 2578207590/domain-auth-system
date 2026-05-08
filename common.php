@@ -5,6 +5,27 @@
  */
 define('IN_SYSTEM', true);
 
+// ─── 域名格式校验（仅标准域名，禁止IP/路径/任意字符串）─
+function isValidDomain($domain) {
+    $domain = trim(strtolower($domain));
+    // 空、空格直接拒绝
+    if (empty($domain) || strpos($domain, ' ') !== false) return false;
+    // 允许泛域名 *.xxx.com
+    if (substr($domain, 0, 2) === '*.') {
+        $suffix = substr($domain, 2);
+        if (empty($suffix)) return false;
+        return (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', $suffix);
+    }
+    // 拒绝 IP 地址（IPv4 / IPv6）
+    if (filter_var($domain, FILTER_VALIDATE_IP)) return false;
+    // 拒绝 localhost、纯数字、包含路径协议等
+    if (in_array($domain, ['localhost', 'localhost.localdomain', 'localhost6', 'localhost6.localdomain6'])) return false;
+    if (preg_match('#^https?://#i', $domain)) return false;
+    if (strpos($domain, '/') !== false) return false;
+    // 标准域名正则
+    return (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', $domain);
+}
+
 // ─── 域名清洗 ─────────────────────────────
 function cleanDomain($host) {
     $host = strtolower(trim($host));

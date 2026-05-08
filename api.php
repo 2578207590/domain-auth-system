@@ -42,7 +42,7 @@ if ($act === 'list') {
 
 // 2. 检查当前域名授权状态（含到期 + 频率限制）
 if ($act === 'check') {
-    if (empty($domain)) {
+    if (empty($domain) || !isValidDomain($domain)) {
         echo json_encode(['code' => 0]);
         exit;
     }
@@ -60,10 +60,14 @@ if ($act === 'check') {
     exit;
 }
 
-// 3. 卡密激活域名（含 365 天到期 + 频率限制）
+// 3. 卡密激活域名（含频率限制）
 if ($act === 'active') {
     if (empty($domain) || empty($code)) {
         echo json_encode(['code' => 0, 'msg' => '参数不完整']);
+        exit;
+    }
+    if (!isValidDomain($domain)) {
+        echo json_encode(['code' => 0, 'msg' => '域名格式不正确']);
         exit;
     }
 
