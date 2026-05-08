@@ -19,59 +19,61 @@ $authExpireTime = null;
 $isWildcardQuery = false;
 
 if (isset($_POST['check']) || isset($_POST['active'])) {
-    $domain = trim($_POST['domain'] ?? '');
-    $isWildcard = (strpos($domain, '*') !== false);
+    $domainRaw = trim($_POST['domain'] ?? '');
+    $isWildcard = (strpos($domainRaw, '*') !== false);
     $isWildcardQuery = $isWildcard;
-    $domain = $isWildcard ? $domain : cleanDomain($domain);
+    $domain = $isWildcard ? $domainRaw : cleanDomain($domainRaw);
 
+    // 校验域名/IP 格式
     if (!isValidAddress($domain)) {
-        $activationResult = ['code' => -1, 'msg' => '请输入正确的域名或IP地址'];
-    } else {
+        setcookie('msg', 'invalid_address', time() + 5, '/');
+        setcookie('domain_raw', $domainRaw, time() + 60, '/');
+        setcookie('domain', '', time() - 100, '/');
+        header('Location: index.php');
+        exit;
+    }
 
-        if (isset($_POST['check'])) {
-            $result = checkDomainAuth($conn, $domain);
-            $authStatus = $result['code'];
-            $authExpireTime = $result['expire_time'] ?? null;
-            addLog($conn, '查询域名', "域名:{$domain} 状态:{$result['code']}", true);
-            setcookie('domain', $domain, time() + 60, '/');
-            setcookie('domain_expire', $authExpireTime ?? '', time() + 60, '/');
-            header('Location: index.php');
-            exit;
-        }
+    // 格式合法才保留域名到 cookie
+    setcookie('domain', $domain, time() + 60, '/');
 
-        if (isset($_POST['active'])) {
-            if ($isWildcard) {
-                $activationResult = ['code' => 0, 'msg' => '泛域名需管理员续费，无法通过卡密激活'];
+    if (isset($_POST['check'])) {
+        $result = checkDomainAuth($conn, $domain);
+        $authStatus = $result['code'];
+        $authExpireTime = $result['expire_time'] ?? null;
+        addLog($conn, '查询域名', "域名:{$domain} 状态:{$result['code']}", true);
+        setcookie('domain_expire', $authExpireTime ?? '', time() + 60, '/');
+        setcookie('domain_raw', $domainRaw, time() + 60, '/');
+        header('Location: index.php');
+        exit;
+    }
+
+    if (isset($_POST['active'])) {
+        if ($isWildcard) {
+            setcookie('msg', 'wildcard_blocked', time() + 5, '/');
+        } else {
+            $code = trim($_POST['code'] ?? '');
+            if (!$code) {
+                setcookie('msg', 'empty_code', time() + 5, '/');
             } else {
-                $code = trim($_POST['code'] ?? '');
-                if (!$code) {
-                    $activationResult = ['code' => 0, 'msg' => '请输入卡密'];
+                $result = activateDomain($conn, $domain, $code);
+                if ($result['code'] === 1) {
+                    setcookie('msg', 'active_success', time() + 5, '/');
+                    setcookie('expire_info', $result['expire_time'] ?? '', time() + 5, '/');
+                    $recheck = checkDomainAuth($conn, $domain);
+                    setcookie('domain_expire', $recheck['expire_time'] ?? '', time() + 60, '/');
+                    setcookie('domain', $domain, time() + 60, '/');
                 } else {
-                    $activationResult = activateDomain($conn, $domain, $code);
-                    if ($activationResult['code'] === 1) {
-                        setcookie('msg', 'active_success', time() + 5, '/');
-                        setcookie('expire_info', $activationResult['expire_time'] ?? '', time() + 5, '/');
-                        setcookie('domain', $domain, time() + 60, '/');
-                        $recheck = checkDomainAuth($conn, $domain);
-                        setcookie('domain_expire', $recheck['expire_time'] ?? '', time() + 60, '/');
-                        header('Location: index.php');
-                        exit;
-                    }
+                    setcookie('msg', 'invalid_code', time() + 5, '/');
                 }
             }
         }
+        header('Location: index.php');
+        exit;
     }
-    // 激活失败：用 session 传递错误 + 保留域名到 cookie
-    $_SESSION['activation_err'] = $activationResult['msg'] ?? '操作失败';
-    setcookie('domain', $domain, time() + 60, '/');
-    header('Location: index.php');
-    exit;
 }
 
-// 读取激活错误
-$activationErr = $_SESSION['activation_err'] ?? '';
-unset($_SESSION['activation_err']);
-
+// ─── 消息渲染（仅从 cookie 读取，单一路径）─
+$msg = '';
 if (isset($_COOKIE['msg'])) {
     $m = $_COOKIE['msg'];
     $ein = $_COOKIE['expire_info'] ?? '';
@@ -85,19 +87,24 @@ if (isset($_COOKIE['msg'])) {
         'empty_code' => '<div class="msg error">请输入卡密</div>',
         'invalid_code' => '<div class="msg error">卡密无效或已使用</div>',
         'invalid_domain' => '<div class="msg error">请输入正确域名</div>',
+        'invalid_address' => '<div class="msg error">请输入正确的域名或IP地址</div>',
         'wildcard_blocked' => '<div class="msg error">泛域名需管理员手动添加，无法通过卡密激活</div>',
         'active_success' => '<div class="msg success">✅ 激活成功' . $expireDisplay . '</div>'
     ];
     $msg = $map[$m] ?? '';
     setcookie('msg', '', time() - 100, '/');
     setcookie('expire_info', '', time() - 100, '/');
+    // 清除可能残留的 session 消息
+    unset($_SESSION['activation_err']);
 }
 
-// 激活失败提示优先 cookies
-if ($activationErr && !$msg) {
-    $msg = '<div class="msg error">' . htmlspecialchars($activationErr) . '</div>';
+// 保留用户输入的域名
+if (isset($_COOKIE['domain_raw'])) {
+    $domain = $_COOKIE['domain_raw'];
+    setcookie('domain_raw', '', time() - 100, '/');
 }
 
+// 读取查询结果（合法域名授权状态）
 if (isset($_COOKIE['domain'])) {
     $domain = $_COOKIE['domain'];
     $isWildcardQuery = (strpos($domain, '*') !== false);
@@ -248,35 +255,8 @@ function checkDomain() {
         v = v.replace(/\/.*$/, '');
         v = v.replace(/^www\./i, '');
     }
-    v = v.trim();
-    el.value = v;
-    if (!v) { alert('请输入域名或IP地址'); return false; }
-    // 泛域名校验
-    if (isWildcard) {
-        let suffix = v.substring(2);
-        if (!suffix || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(suffix)) {
-            alert('请输入正确的泛域名（如 *.abc.com）');
-            return false;
-        }
-        return true;
-    }
-    // IP 地址校验
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) {
-        let parts = v.split('.');
-        for (let p of parts) {
-            if (parseInt(p) > 255 || (p.length > 1 && p.startsWith('0'))) {
-                alert('IP 地址格式不正确');
-                return false;
-            }
-        }
-        return true;
-    }
-    // 域名校验
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(v)) {
-        alert('请输入正确的域名（如 abc.com）或 IP 地址');
-        return false;
-    }
-    return true;
+    el.value = v.trim();
+    return true; // 前端只做清理，不弹窗，全由服务端校验和提示
 }
 </script>
 </body>
