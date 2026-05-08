@@ -514,10 +514,10 @@ select.mini{width:auto;height:32px;min-width:80px;font-size:12px;padding:0 8px}
 <?php endif; ?>
 
 <div class="cd">
-  <div class="cd-t">➕ 手动添加域名（支持泛域名）</div>
+  <div class="cd-t">➕ 手动添加域名/IP（支持泛域名）</div>
   <form method="post" class="fg2">
     <input type="hidden" name="t" value="<?=$tk?>">
-    <div class="fi"><label>域名</label><input name="dom" placeholder="abc.com / *.abc.com" required></div>
+    <div class="fi"><label>域名/IP</label><input name="dom" placeholder="abc.com / *.abc.com / 192.168.1.1" required></div>
     <div class="fi"><label>授权天数</label><select name="dd" onchange="var v=this.value;document.getElementById('dcustom').style.display=v==='custom'?'block':'none';if(v!=='custom')document.getElementById('dcustom').value=''">
       <option value="30">30天</option><option value="90">90天</option><option value="180">180天</option><option value="365" selected>365天</option><option value="0">永久</option><option value="custom">自定义...</option>
     </select>

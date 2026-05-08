@@ -24,8 +24,8 @@ if (isset($_POST['check']) || isset($_POST['active'])) {
     $isWildcardQuery = $isWildcard;
     $domain = $isWildcard ? $domain : cleanDomain($domain);
 
-    if (!isValidDomain($domain)) {
-        $activationResult = ['code' => -1, 'msg' => '请输入正确的域名（如 abc.com）'];
+    if (!isValidAddress($domain)) {
+        $activationResult = ['code' => -1, 'msg' => '请输入正确的域名或IP地址'];
     } else {
 
         if (isset($_POST['check'])) {
@@ -165,8 +165,8 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
     <?php echo $msg?>
     <form method="post" onsubmit="return checkDomain()">
         <div class="form-group">
-            <label class="form-label">域名（仅支持标准域名）</label>
-            <input type="text" class="form-input" name="domain" placeholder="如 abc.com 或输入完整网址自动识别" value="<?php echo htmlspecialchars($domain)?>" required autocomplete="off" onblur="checkDomain()">
+            <label class="form-label">域名 / 服务器IP</label>
+            <input type="text" class="form-input" name="domain" placeholder="如 abc.com、192.168.1.1 或输入网址自动识别" value="<?php echo htmlspecialchars($domain)?>" required autocomplete="off" onblur="checkDomain()">
         </div>
         <button type="submit" name="check" class="btn">🔍 查询授权状态</button>
 
@@ -242,7 +242,6 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 function checkDomain() {
     let el = document.querySelector('[name=domain]');
     let v = el.value.trim();
-    // 自动去除协议、路径、www 前缀（泛域名保留 *）
     let isWildcard = v.startsWith('*.');
     if (!isWildcard) {
         v = v.replace(/^https?:\/\//i, '');
@@ -251,24 +250,31 @@ function checkDomain() {
     }
     v = v.trim();
     el.value = v;
-    if (!v) { alert('请输入域名'); return false; }
-    // 标准域名校验
+    if (!v) { alert('请输入域名或IP地址'); return false; }
+    // 泛域名校验
     if (isWildcard) {
         let suffix = v.substring(2);
         if (!suffix || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(suffix)) {
             alert('请输入正确的泛域名（如 *.abc.com）');
             return false;
         }
-    } else {
-        // 拒绝 IP
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) {
-            alert('请输入域名，不能使用IP地址');
-            return false;
+        return true;
+    }
+    // IP 地址校验
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) {
+        let parts = v.split('.');
+        for (let p of parts) {
+            if (parseInt(p) > 255 || (p.length > 1 && p.startsWith('0'))) {
+                alert('IP 地址格式不正确');
+                return false;
+            }
         }
-        if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(v)) {
-            alert('请输入正确的域名（如 abc.com）');
-            return false;
-        }
+        return true;
+    }
+    // 域名校验
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i.test(v)) {
+        alert('请输入正确的域名（如 abc.com）或 IP 地址');
+        return false;
     }
     return true;
 }

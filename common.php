@@ -5,25 +5,31 @@
  */
 define('IN_SYSTEM', true);
 
-// ─── 域名格式校验（仅标准域名，禁止IP/路径/任意字符串）─
-function isValidDomain($domain) {
-    $domain = trim(strtolower($domain));
-    // 空、空格直接拒绝
-    if (empty($domain) || strpos($domain, ' ') !== false) return false;
+// ─── IP 检测 ──────────────────────────────
+function isIPAddress($address) {
+    return (bool)filter_var($address, FILTER_VALIDATE_IP);
+}
+
+// ─── 地址格式校验（标准域名 或 IP）─────────
+function isValidAddress($address) {
+    $address = trim(strtolower($address));
+    if (empty($address) || strpos($address, ' ') !== false) return false;
+    // 允许 IP
+    if (filter_var($address, FILTER_VALIDATE_IP)) return true;
     // 允许泛域名 *.xxx.com
-    if (substr($domain, 0, 2) === '*.') {
-        $suffix = substr($domain, 2);
+    if (substr($address, 0, 2) === '*.') {
+        $suffix = substr($address, 2);
         if (empty($suffix)) return false;
         return (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', $suffix);
     }
-    // 拒绝 IP 地址（IPv4 / IPv6）
-    if (filter_var($domain, FILTER_VALIDATE_IP)) return false;
-    // 拒绝 localhost、纯数字、包含路径协议等
-    if (in_array($domain, ['localhost', 'localhost.localdomain', 'localhost6', 'localhost6.localdomain6'])) return false;
-    if (preg_match('#^https?://#i', $domain)) return false;
-    if (strpos($domain, '/') !== false) return false;
+    // 拒绝 localhost 等
+    if (in_array($address, ['localhost', 'localhost.localdomain', 'localhost6', 'localhost6.localdomain6'])) return false;
+    if (preg_match('#^https?://#i', $address)) return false;
+    if (strpos($address, '/') !== false) return false;
+    // 拒绝纯 IP 格式但不符合 filter_var 的（如 999.999.999.999）
+    if (preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $address)) return false;
     // 标准域名正则
-    return (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', $domain);
+    return (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/i', $address);
 }
 
 // ─── 域名清洗 ─────────────────────────────
@@ -36,17 +42,24 @@ function cleanDomain($host) {
     return $host;
 }
 
-// ─── 泛域名匹配 ──────────────────────────
+// ─── 域名/IP 匹配 ─────────────────────────
 function isDomainMatch($authDomain, $currentDomain) {
     $authDomain = strtolower(trim($authDomain));
     $currentDomain = strtolower(trim($currentDomain));
     if ($authDomain === $currentDomain) return true;
-    // PHP 7.x 兼容：substr 替代 str_starts_with
+    // IP 地址不走泛域名匹配
+    if (filter_var($authDomain, FILTER_VALIDATE_IP)) return false;
+    // 泛域名匹配
     if (substr($authDomain, 0, 2) === '*.') {
         $suffix = ltrim($authDomain, '*.');
         return (bool)preg_match('/\.' . preg_quote($suffix, '/') . '$/', $currentDomain);
     }
     return false;
+}
+
+// ─── 获取授权地址类型标签 ───────────────────
+function addressTypeLabel($address) {
+    return filter_var($address, FILTER_VALIDATE_IP) ? 'IP' : '域名';
 }
 
 // ─── 获取客户端 IP ────────────────────────

@@ -42,7 +42,7 @@ if ($act === 'list') {
 
 // 2. 检查当前域名授权状态（含到期 + 频率限制）
 if ($act === 'check') {
-    if (empty($domain) || !isValidDomain($domain)) {
+    if (empty($domain) || !isValidAddress($domain)) {
         echo json_encode(['code' => 0]);
         exit;
     }
@@ -66,7 +66,7 @@ if ($act === 'active') {
         echo json_encode(['code' => 0, 'msg' => '参数不完整']);
         exit;
     }
-    if (!isValidDomain($domain)) {
+    if (!isValidAddress($domain)) {
         echo json_encode(['code' => 0, 'msg' => '域名格式不正确']);
         exit;
     }
