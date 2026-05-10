@@ -1,6 +1,58 @@
 (function() {
-    // 这里改成你自己的 API 地址
+    // 配置
     const API = "https://your-domain.com/api.php";
+    const CACHE_PREFIX = 'auth_cache_';
+
+    var _unauthorized = false;
+    var _pollingStarted = false;
+
+    // ─── 反 F12 / 反 DevTools ────────────────
+    function antiDevTools() {
+        document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'F12' ||
+                (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+                (e.ctrlKey && e.key === 'U')) {
+                e.preventDefault();
+                return false;
+            }
+        });
+    }
+
+    // ─── 离线缓存 ───────────────────────────
+    function setOfflineCache(host, data) {
+        try {
+            localStorage.setItem(CACHE_PREFIX + host, JSON.stringify({
+                code: data.code,
+                expire_time: data.expire_time || null,
+                cached_at: Date.now()
+            }));
+        } catch(e) {}
+    }
+
+    function getOfflineCache(host) {
+        try {
+            var raw = localStorage.getItem(CACHE_PREFIX + host);
+            return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+    }
+
+    function checkOfflineAuth(host) {
+        var cached = getOfflineCache(host);
+        if (!cached) return null;
+        if (cached.code === 1 && cached.expire_time) {
+            return Date.parse(cached.expire_time) > Date.now()
+                ? { authorized: true, expire_time: cached.expire_time }
+                : { authorized: false, expired: true };
+        }
+        if (cached.code === 1 && !cached.expire_time) {
+            return { authorized: true, expire_time: null };
+        }
+        if (cached.code === 2) {
+            return { authorized: false, expired: true };
+        }
+        return null;
+    }
 
     function getCurrentDomain() {
         let host = location.host.toLowerCase().trim();
@@ -26,6 +78,7 @@
         div.id = "auth-modal";
         div.innerHTML = `<style>
 #auth-modal{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999999;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Microsoft YaHei,sans-serif}
+#auth-modal ~ *{pointer-events:none!important;user-select:none!important}
 .auth-box{background:#fff;border-radius:20px;width:90%;max-width:420px;padding:32px;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeIn .3s ease-out}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
 .auth-title{font-size:22px;font-weight:700;text-align:center;margin-bottom:8px;color:#111827}
@@ -38,6 +91,7 @@
 .auth-msg{margin-top:12px;text-align:center;font-size:14px;color:#ef4444;min-height:20px}
 .auth-msg.success{color:#10b981}
 .ban-msg{color:#ef4444;font-weight:600;text-align:center;margin-bottom:20px;padding:12px;background:#fef2f2;border-radius:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 <div class="auth-box">
 <div class="auth-title">${isBanned ? '域名已封禁' : isExpired ? '域名已到期' : '域名未授权'}</div>
@@ -50,6 +104,7 @@
 <div class="auth-msg" id="msg"></div>
 </div>`;
         document.body.appendChild(div);
+        startPolling(); // 启动遮罩防移除轮询
 
         if (isBanned) return;
 
@@ -97,25 +152,59 @@
         if (host === 'localhost' || host.match(/^127\.0\.0\.1$/) || host.match(/^192\.168\./)) return;
 
         try {
-            const res = await fetch(`${API}?act=check&domain=${encodeURIComponent(host)}`);
+            const controller = new AbortController();
+            const timeout = setTimeout(function() { controller.abort(); }, 5000);
+            const res = await fetch(API + '?act=check&domain=' + encodeURIComponent(host) + '&_=' + Date.now(), { signal: controller.signal });
+            clearTimeout(timeout);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
+
+            // 联网成功 → 缓存结果
+            setOfflineCache(host, data);
 
             if (data.code === -1) { createAuthBox('banned'); return; }
             if (data.code === 2) { createAuthBox('expired'); return; }
             if (data.code === 1) return;
 
             // 二次泛域名兜底
-            const listRes = await fetch(`${API}?act=list`);
-            const list = await listRes.json();
-            let isAuth = false;
-            for (let d of list) {
-                if (isDomainMatch(d, host)) { isAuth = true; break; }
-            }
-            if (!isAuth) { createAuthBox('unauthorized'); }
+            try {
+                var listRes = await fetch(API + '?act=list&_=' + Date.now());
+                if (listRes.ok) {
+                    var list = await listRes.json();
+                    for (var i = 0; i < list.length; i++) {
+                        if (isDomainMatch(list[i], host)) { return; }
+                    }
+                }
+            } catch(e) {}
+            _unauthorized = true;
+            createAuthBox('unauthorized');
         } catch (e) {
-            console.error('授权检查失败:', e);
+            // ── 断网 → 读离线缓存 ──
+            var offline = checkOfflineAuth(host);
+            if (offline) {
+                if (offline.authorized) return;
+                _unauthorized = true;
+                createAuthBox('expired');
+                return;
+            }
         }
     }
+
+    // ─── 遮罩防移除轮询（只有未授权时才跑，3秒一次）─
+    function startPolling() {
+        if (_pollingStarted) return;
+        _pollingStarted = true;
+        setInterval(function() {
+            if (!_unauthorized) return;
+            var modal = document.getElementById('auth-modal');
+            if (!modal || !document.body.contains(modal)) {
+                createAuthBox('unauthorized');
+            }
+        }, 3000);
+    }
+
+    // ─── 启动 ──────────────────────────────
+    antiDevTools();
 
     if (document.readyState === 'complete') {
         checkAuth();
